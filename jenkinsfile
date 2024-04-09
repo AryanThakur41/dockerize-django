@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_CREDENTIALS_ID = 'docker-hub-credentials'
+        KUBE_CONFIG = credentials('kubeconfig')
+        KUBE_NAMESPACE = 'your-namespace'
+        KUBE_DEPLOYMENT = 'your-deployment-name'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    docker.build("your-docker-image:latest")
+                }
+            }
+        }
+
+        stage('Push Docker Image to Registry') {
+            steps {
+                script {
+                    docker.withRegistry('https://registry.hub.docker.com', DOCKER_CREDENTIALS_ID) {
+                        docker.image("your-docker-image:latest").push('latest')
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    sh 'kubectl apply -f kubernetes/deployment.yaml --kubeconfig=$KUBE_CONFIG --namespace=$KUBE_NAMESPACE'
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    timeout(time: 5, unit: 'minutes') {
+                        sh 'kubectl rollout status deployment/$KUBE_DEPLOYMENT --kubeconfig=$KUBE_CONFIG --namespace=$KUBE_NAMESPACE'
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment successful!'
+        }
+        failure {
+            echo 'Deployment failed!'
+        }
+        unstable {
+            echo 'Deployment unstable!'
+        }
+        cleanup {
+            echo 'Cleaning up...'
+            sh 'kubectl delete deployment $KUBE_DEPLOYMENT --kubeconfig=$KUBE_CONFIG --namespace=$KUBE_NAMESPACE'
+        }
+    }
+}
